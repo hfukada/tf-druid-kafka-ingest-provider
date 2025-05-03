@@ -7,12 +7,10 @@ import (
     "fmt"
     "io"
     "net/http"
+		
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 
-    "github.com/hashicorp/terraform-plugin-framework/provider"
-    "github.com/hashicorp/terraform-plugin-framework/providerserver"
-    "github.com/hashicorp/terraform-plugin-framework/resource"
-    "github.com/hashicorp/terraform-plugin-framework/schema"
-    "github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // -------------------- provider entrypoint --------------------
@@ -34,7 +32,7 @@ type druidProvider struct {
 }
 
 func (p *druidProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
-    resp.TypeName = "druid"
+    resp.TypeName = "druid-supervisor-kafka"
 }
 
 func (p *druidProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
@@ -78,8 +76,6 @@ func (p *druidProvider) Configure(ctx context.Context, req provider.ConfigureReq
 func (p *druidProvider) Resources(_ context.Context) []func() resource.Resource {
     return []func() resource.Resource{NewKafkaSupervisorResource}
 }
-
-func (p *druidProvider) DataSources(context.Context) []func() provider.DataSource { return nil }
 
 // -------------------- resource implementation --------------------
 

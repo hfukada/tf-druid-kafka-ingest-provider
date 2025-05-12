@@ -1,81 +1,93 @@
 package main
 
 import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-		
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-
 )
 
-// -------------------- provider entrypoint --------------------
-func main() {
-    providerserver.Serve(context.Background(), New, providerserver.ServeOpts{
-        Address: "registry.terraform.io/example/druid", // change to your namespace
-    })
+type druidClient struct{
+	username string
+	password string
+	endpoint string
+	sslcert string
+	http *http.Client
 }
 
-func New() provider.Provider { return &druidProvider{} }
 
-// -------------------- provider implementation --------------------
+func init() {
+	schema.DescriptionKind = schema.StringMarkdown
 
-type druidProvider struct {
-    endpoint string
-    username string
-    password string
-		useTls   bool
+	schema.SchemaDescriptionBuilder = func(s *schema.Schema) string {
+		desc := s.Description
+		if s.Default != nil {
+			desc += fmt.Sprintf(" Defaults to `%v`.", s.Default)
+		}
+		if s.Computed {
+			desc += " Generated."
+		}
+		return strings.TrimSpace(desc)
+	}
 }
 
-func (p *druidProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
-    resp.TypeName = "druid-supervisor-kafka"
+func Provider(version string, testing bool) *schema.Provider {
+	return &schema.Provider{
+		Schema: map[string]*schema.Schema{
+			"endpoint": {
+				Type: schema.TypeString,
+				Required: true,
+				Description: "Router endpoint server with port",
+				DefaultFunc: schema.EnvDefaultFunc("DRUID_ENDPOINT", "http://localhost:8080"),
+			},
+			"username": {
+				Type: schema.TypeString,
+				Required: true,
+				Description: "Druid Username to authenticate as",
+				DefaultFunc: schema.EnvDefaultFunc("DRUID_USERNAME", "username"),
+			},
+			"password": {
+				Type: schema.TypeString,
+				Required: true,
+				Description: "Druid Password to authenticate with",
+				DefaultFunc: schema.EnvDefaultFunc("DRUID_ENDPOINT", "password"),
+			},
+			"sslcert": {
+				Type: schema.TypeString,
+				Required: false,
+				Description: "Use this specific certificate for TLS comms for authentication",
+				DefaultFunc: schema.EnvDefaultFunc("DRUID_CERT", ""),
+			},
+		},
+		ConfigureContextFunc: configureProvider,
+		ResourcesMap: map[string]*schema.Resource{
+			"druid_kafka_supervisor": resourceKafkaSupervisor(),
+		},
+	}
 }
 
-func (p *druidProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
-    resp.Schema = schema.Schema{
-        Attributes: map[string]schema.Attribute{
-            "endpoint": schema.StringAttribute{
-                Required:    true,
-                Description: "Base URL of the Druid Overlord API (e.g. https://druid.example.com)",
-            },
-            "username": schema.StringAttribute{
-                Optional:    true,
-                Description: "Basic‑auth username (optional)",
-            },
-            "password": schema.StringAttribute{
-                Optional:    true,
-                Sensitive:   true,
-                Description: "Basic‑auth password (optional)",
-            },
-        },
+func configureProvider(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
+    endpoint := d.Get("endpoint").(string)
+    username := d.Get("username").(string)
+    password := d.Get("password").(string)
+		cert := d.Get("sslcert").(string)
+
+    client := &druidClient{
+        endpoint: endpoint,
+        username: username,
+        password: password,
+				sslcert: cert,
+        http:     &http.Client{},
     }
+    return client, nil
 }
 
-func (p *druidProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-    var cfg struct {
-        Endpoint types.String `tfsdk:"endpoint"`
-        Username types.String `tfsdk:"username"`
-        Password types.String `tfsdk:"password"`
-    }
-    diags := req.Config.Get(ctx, &cfg)
-    resp.Diagnostics.Append(diags...)
-    if resp.Diagnostics.HasError() {
-        return
-    }
-    p.endpoint = cfg.Endpoint.ValueString()
-    p.username = cfg.Username.ValueString()
-    p.password = cfg.Password.ValueString()
-    resp.DataSourceData = p
-    resp.ResourceData = p
-}
-
-func (p *druidProvider) Resources(_ context.Context) []func() resource.Resource {
-    return []func() resource.Resource{NewKafkaSupervisorResource}
-}
 
 // -------------------- resource implementation --------------------
 
@@ -83,150 +95,148 @@ type kafkaSupervisorResource struct{
     client *druidClient
 }
 
-func NewKafkaSupervisorResource() resource.Resource { return &kafkaSupervisorResource{} }
-
-func (r *kafkaSupervisorResource) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
-    resp.TypeName = "druid_kafka_supervisor"
-}
-
-func (r *kafkaSupervisorResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-    resp.Schema = schema.Schema{
-        Attributes: map[string]schema.Attribute{
-            "id": schema.StringAttribute{
-                Computed:    true,
-                Description: "Supervisor ID (datasource name)",
-            },
-            "spec": schema.StringAttribute{
+func resourceKafkaSupervisor() *schema.Resource {
+    return &schema.Resource{
+        Schema: map[string]*schema.Schema{
+            "jsonSpec": {
+                Type:        schema.TypeString,
                 Required:    true,
                 Description: "Full Kafka supervisor JSON spec",
             },
         },
+
+        CreateContext: resourceKafkaSupervisorCreate,
+        ReadContext:   resourceKafkaSupervisorRead,
+        UpdateContext: resourceKafkaSupervisorUpdate,
+        DeleteContext: resourceKafkaSupervisorDelete,
+
+        Importer: &schema.ResourceImporter{
+            StateContext: schema.ImportStatePassthroughContext,
+        },
     }
 }
 
-type supervisorModel struct {
-    ID   types.String `tfsdk:"id"`
-    Spec types.String `tfsdk:"spec"`
-}
+func resourceKafkaSupervisorCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*druidClient)
+    spec := d.Get("spec").(string)
 
-func (r *kafkaSupervisorResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
-    if req.ProviderData == nil { return }
-    p := req.ProviderData.(*druidProvider)
-    r.client = &druidClient{endpoint: p.endpoint, username: p.username, password: p.password}
-}
-
-// ---- CRUD ----
-func (r *kafkaSupervisorResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-    var plan supervisorModel
-    diags := req.Plan.Get(ctx, &plan)
-    resp.Diagnostics.Append(diags...)
-    if resp.Diagnostics.HasError() { return }
-
-    id, err := r.client.CreateOrUpdate(ctx, plan.Spec.ValueString())
+    id, err := client.CreateOrUpdate(ctx, spec)
     if err != nil {
-        resp.Diagnostics.AddError("creating supervisor", err.Error())
-        return
+        return diag.FromErr(err)
     }
-    plan.ID = types.StringValue(id)
-    resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...) // save state
+
+    d.SetId(id)
+    return resourceKafkaSupervisorRead(ctx, d, meta)
 }
 
-func (r *kafkaSupervisorResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-    var state supervisorModel
-    resp.Diagnostics.Append(req.State.Get(ctx, &state)...) // read current state
-    if resp.Diagnostics.HasError() { return }
+func resourceKafkaSupervisorRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*druidClient)
 
-    found, spec, err := r.client.Get(ctx, state.ID.ValueString())
+    found, spec, err := client.Get(ctx, d.Id())
     if err != nil {
-        resp.Diagnostics.AddError("reading supervisor", err.Error())
-        return
+        return diag.FromErr(err)
     }
     if !found {
-        resp.State.RemoveResource(ctx)
-        return
+        d.SetId("")
+        return nil
     }
-    state.Spec = types.StringValue(spec)
-    resp.Diagnostics.Append(resp.State.Set(ctx, &state)...) // refresh state
+
+    _ = d.Set("spec", spec)
+    return nil
 }
 
-func (r *kafkaSupervisorResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-    var plan supervisorModel
-    resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-    if resp.Diagnostics.HasError() { return }
-
-    _, err := r.client.CreateOrUpdate(ctx, plan.Spec.ValueString())
-    if err != nil {
-        resp.Diagnostics.AddError("updating supervisor", err.Error())
-        return
+func resourceKafkaSupervisorUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    if d.HasChange("spec") {
+        client := meta.(*druidClient)
+        spec := d.Get("spec").(string)
+        if _, err := client.CreateOrUpdate(ctx, spec); err != nil {
+            return diag.FromErr(err)
+        }
     }
-    resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...) // persist
+    return resourceKafkaSupervisorRead(ctx, d, meta)
 }
 
-func (r *kafkaSupervisorResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-    var state supervisorModel
-    resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-    if resp.Diagnostics.HasError() { return }
-    if err := r.client.Delete(ctx, state.ID.ValueString()); err != nil {
-        resp.Diagnostics.AddError("deleting supervisor", err.Error())
+func resourceKafkaSupervisorDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*druidClient)
+    if err := client.Delete(ctx, d.Id()); err != nil {
+        return diag.FromErr(err)
     }
+    d.SetId("")
+    return nil
 }
 
-// -------------------- simple HTTP client --------------------
-
-type druidClient struct {
-    endpoint string
-    username string
-    password string
-}
+// -------------------- druidClient helpers --------------------
 
 func (c *druidClient) newReq(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
     req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("%s%s", c.endpoint, path), body)
-    if err != nil { return nil, err }
-    if c.username != "" { req.SetBasicAuth(c.username, c.password) }
+    if err != nil {
+        return nil, err
+    }
+    if c.username != "" {
+        req.SetBasicAuth(c.username, c.password)
+    }
     req.Header.Set("Content-Type", "application/json")
     return req, nil
 }
 
 func (c *druidClient) CreateOrUpdate(ctx context.Context, spec string) (string, error) {
     req, err := c.newReq(ctx, http.MethodPost, "/druid/indexer/v1/supervisor", bytes.NewBufferString(spec))
-    if err != nil { return "", err }
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil { return "", err }
+    if err != nil {
+        return "", err
+    }
+    resp, err := c.http.Do(req)
+    if err != nil {
+        return "", err
+    }
     defer resp.Body.Close()
-    if resp.StatusCode >= 400 {
+
+    if resp.StatusCode >= http.StatusBadRequest {
         body, _ := io.ReadAll(resp.Body)
         return "", fmt.Errorf("druid error %d: %s", resp.StatusCode, body)
     }
-    // Druid echoes back {"id":"<datasource>"}
+
     var out struct{ ID string `json:"id"` }
-    _ = json.NewDecoder(resp.Body).Decode(&out)
+    if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+        return "", err
+    }
     return out.ID, nil
 }
 
 func (c *druidClient) Get(ctx context.Context, id string) (bool, string, error) {
     req, err := c.newReq(ctx, http.MethodGet, "/druid/indexer/v1/supervisor/"+id, nil)
-    if err != nil { return false, "", err }
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil { return false, "", err }
+    if err != nil {
+        return false, "", err
+    }
+    resp, err := c.http.Do(req)
+    if err != nil {
+        return false, "", err
+    }
     defer resp.Body.Close()
-    if resp.StatusCode == http.StatusNotFound { return false, "", nil }
-    if resp.StatusCode >= 400 {
+
+    if resp.StatusCode == http.StatusNotFound {
+        return false, "", nil
+    }
+    if resp.StatusCode >= http.StatusBadRequest {
         body, _ := io.ReadAll(resp.Body)
         return false, "", fmt.Errorf("druid error %d: %s", resp.StatusCode, body)
     }
+
     body, _ := io.ReadAll(resp.Body)
     return true, string(body), nil
 }
 
 func (c *druidClient) Delete(ctx context.Context, id string) error {
     req, err := c.newReq(ctx, http.MethodDelete, "/druid/indexer/v1/supervisor/"+id, nil)
-    if err != nil { return err }
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil { return err }
+    if err != nil {
+        return err
+    }
+    resp, err := c.http.Do(req)
+    if err != nil {
+        return err
+    }
     if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
         body, _ := io.ReadAll(resp.Body)
         return fmt.Errorf("druid error %d: %s", resp.StatusCode, body)
     }
     return nil
 }
-

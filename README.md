@@ -31,9 +31,18 @@ This is a Terraform provider for managing Apache Druid Kafka ingestion superviso
 │   ├── client_test.go               # Client unit tests
 │   ├── resource_kafka_supervisor_test.go          # Resource unit tests
 │   └── resource_kafka_supervisor_acceptance_test.go # Acceptance tests
-└── examples/                        # Usage examples
-    ├── basic/main.tf                # Basic configuration example
-    └── advanced/main.tf             # Advanced configuration example
+├── examples/                        # Usage examples
+│   ├── basic/main.tf                # Basic configuration example
+│   ├── advanced/main.tf             # Advanced configuration example
+│   └── kafka-ingestion/             # Complete Kafka ingestion demo
+│       ├── main.tf                  # Ingestion supervisor configuration
+│       ├── docker-compose.yaml      # Docker environment setup
+│       ├── environment              # Druid configuration
+│       ├── setup-ingestion-demo.sh  # Automated setup script
+│       ├── setup-kafka-topics.sh    # Kafka topic creation
+│       ├── produce-sample-data.sh   # Sample data generation
+│       ├── sample-queries.sql       # Sample Druid queries
+│       └── README.md                # Demo documentation
 ```
 
 ## Development Setup
@@ -103,25 +112,70 @@ go test -v ./internal/provider -run TestAccKafkaSupervisor_basic
 #### Test Structure
 
 - **Unit Tests**: Test individual functions and components in isolation
-  - `provider_test.go`: Tests provider configuration and validation
-  - `client_test.go`: Tests HTTP client functionality with mock servers
-  - `resource_kafka_supervisor_test.go`: Tests resource schema and spec building logic
-
 - **Acceptance Tests**: Test complete resource lifecycle with mock Druid server
-  - `resource_kafka_supervisor_acceptance_test.go`: Full CRUD operations testing
+- **Test Utilities**: Mock Druid server for testing API interactions
 
-- **Test Utilities**: 
-  - `testutils.go`: Mock Druid server for testing API interactions
+## Development Environment
 
-### Testing Philosophy
+### Docker Setup
 
-The test suite includes:
+The repository includes a complete Docker Compose setup with Druid and Kafka for local development and testing. The Docker environment is located in `examples/kafka-ingestion/`:
 
-1. **Schema Validation Tests**: Ensure all required fields, defaults, and validation rules work correctly
-2. **Spec Building Tests**: Verify that Terraform configuration is correctly transformed into Druid API specifications
-3. **API Client Tests**: Test HTTP client interactions with various response scenarios
-4. **End-to-End Tests**: Full resource lifecycle testing with mock servers
-5. **Error Handling Tests**: Comprehensive error scenario coverage
+```bash
+# Navigate to the kafka-ingestion example
+cd examples/kafka-ingestion
+
+# Start the entire stack (Druid + Kafka + PostgreSQL + Zookeeper)
+docker-compose up -d
+
+# Wait for services to be ready, then create Kafka topics
+./setup-kafka-topics.sh
+
+# Produce sample data to test ingestion
+./produce-sample-data.sh wikipedia 100
+```
+
+**Services:**
+- **Druid Router**: http://localhost:8888
+- **Kafka UI**: http://localhost:8080  
+- **Kafka Broker**: localhost:9092
+- **PostgreSQL**: localhost:5432
+- **Zookeeper**: localhost:2181
+
+**Druid Services:**
+- Coordinator: localhost:8081
+- Broker: localhost:8082  
+- Historical: localhost:8083
+- MiddleManager: localhost:8091
+
+### Testing the Provider
+
+#### Complete Kafka Ingestion Demo
+
+For a complete end-to-end demonstration:
+
+```bash
+# Build and test everything with real Kafka ingestion
+cd examples/kafka-ingestion
+./setup-ingestion-demo.sh
+```
+
+This will create a supervisor that ingests sample Wikipedia data from Kafka into Druid.
+
+#### Manual Testing
+
+With the Docker environment running, you can also test manually:
+
+```bash
+# Build the provider
+go build -o terraform-provider-druid
+
+# Run Terraform with the basic example
+cd examples/basic
+terraform init
+terraform plan
+terraform apply
+```
 
 ## Usage Examples
 
@@ -201,13 +255,4 @@ For complete field documentation, see the resource schema in `resource_kafka_sup
 4. Ensure all tests pass
 5. Format code: `go fmt ./...`
 6. Build provider: `go build`
-
-## Testing Guidelines
-
-- Write unit tests for all new functionality
-- Include both positive and negative test cases
-- Test error conditions and edge cases
-- Use table-driven tests for multiple scenarios
-- Mock external dependencies (HTTP servers, etc.)
-- Ensure acceptance tests cover full resource lifecycle
 

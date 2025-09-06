@@ -53,9 +53,14 @@ This script will:
 
 If you prefer to run steps manually:
 
-### 1. Create Kafka Topics
+### 1. Start the Infrastructure
+
+From this directory:
 ```bash
-../../scripts/setup-kafka-topics.sh
+# Start Druid, Kafka, and supporting services
+docker-compose up -d
+
+# Wait for services to be ready (about 60 seconds)
 ```
 
 ### 2. Build and Setup Provider
@@ -73,7 +78,7 @@ terraform init
 
 ### 3. Generate Sample Data
 ```bash
-../../scripts/produce-sample-data.sh wikipedia 100
+./produce-sample-data.sh wikipedia 100
 ```
 
 ### 4. Apply Terraform
@@ -109,7 +114,7 @@ curl -s "http://localhost:8888/druid/indexer/v1/supervisor/wikipedia-kafka-super
 ```bash
 # Continuous data generation
 for i in {1..10}; do
-  ../../scripts/produce-sample-data.sh wikipedia 50
+  ./produce-sample-data.sh wikipedia 50
   sleep 30
 done
 ```
@@ -147,7 +152,7 @@ docker-compose down -v
 
 ### Modify Sample Data
 
-Edit `../../scripts/produce-sample-data.sh` to change:
+Edit `./produce-sample-data.sh` to change:
 - Field values and distributions  
 - Message frequency
 - Data volume

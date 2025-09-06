@@ -91,7 +91,7 @@ resource "druid_kafka_supervisor" "advanced_example" {
   }
 
   consumer_properties = {
-    "bootstrap.servers"                = "kafka1:9092,kafka2:9092,kafka3:9092"
+    "bootstrap.servers"                = "kafka:9092"
     "security.protocol"                = "SASL_SSL"
     "sasl.mechanism"                   = "PLAIN"
     "sasl.jaas.config"                = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\" password=\"pass\";"

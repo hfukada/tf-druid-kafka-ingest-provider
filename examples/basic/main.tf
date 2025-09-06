@@ -134,7 +134,7 @@ resource "druid_kafka_supervisor" "example" {
   }
 
   consumer_properties = {
-    "bootstrap.servers" = "localhost:9092"
+    "bootstrap.servers" = "kafka:9092"
   }
 
   task_count           = 1

@@ -9,17 +9,13 @@ echo ""
 # Check if docker-compose is running
 if ! docker ps | grep -q "druid\|kafka"; then
     echo "ERROR: Docker services not running. Please start with:"
-    echo "   docker-compose up -d"
+    echo "   docker compose up -d"
     exit 1
 fi
 
 # Wait for services to be ready
 echo "Waiting for services to be ready..."
 sleep 15
-
-# Create Kafka topics
-echo "Creating Kafka topics..."
-../../scripts/setup-kafka-topics.sh
 
 # Build the Terraform provider
 echo "Building Terraform provider..."
@@ -37,8 +33,8 @@ echo "Initializing Terraform..."
 terraform init
 
 # Generate sample data
-echo "Generating sample data..."
-../../scripts/produce-sample-data.sh wikipedia 50
+echo "Creating Kafka topics/sample data..."
+./produce-sample-data.sh
 
 echo "Waiting a moment for data to be available..."
 sleep 5

@@ -12,7 +12,7 @@ This example demonstrates how to use the Druid Terraform provider to create a Ka
 
 ### 1. Start the Infrastructure
 
-From the repository root:
+From this directory:
 ```bash
 # Start Druid, Kafka, and supporting services
 docker-compose up -d
@@ -23,7 +23,6 @@ docker-compose up -d
 ### 2. Run the Complete Demo
 
 ```bash
-cd examples/kafka-ingestion
 ./setup-ingestion-demo.sh
 ```
 

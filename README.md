@@ -4,12 +4,10 @@ This is a Terraform provider for managing Apache Druid Kafka ingestion superviso
 
 ## Features
 
-- Complete implementation of the Druid Kafka ingestion supervisor specification
-- Support for all data schema configurations (timestamp, dimensions, metrics, granularity)
-- Full IO configuration including Kafka consumer properties and task management
-- Comprehensive tuning and performance configuration options
+- Implementation of the Druid Kafka ingestion supervisor specification
+- Support for most data schema configurations (timestamp, dimensions, metrics, granularity, flattenspec)
+- IO configuration including Kafka consumer properties and task management
 - Authentication support (basic auth)
-- Proper error handling and validation
 - Terraform state management with import/export capabilities
 
 ## Repository Structure
